@@ -1,10 +1,11 @@
 ---
 title: "C++ / Python 常用接口"
 date: 2026-10-20T12:10:00+08:00
+lastmod: 2026-10-20T16:00:00+08:00
 draft: false
 description: "整理笔试常用的容器、排序、二分、堆、字符串与计数接口，标明复杂度和容易写错的语义"
-slug: "acm-common-apis"
-tags: ["cpp", "python", "acm", "标准库"]
+slug: "cpp-python-apis"
+tags: ["cpp", "python", "标准库"]
 categories: ["笔试重点"]
 comments: true
 math: true
@@ -12,7 +13,29 @@ math: true
 
 # C++ / Python 常用接口
 
-默认使用 C++17 和 Python 3。选择接口时同时确认返回值、是否修改原对象，以及复杂度。下面的片段相互独立，C++ 片段省略 `std::`；实际使用时包含对应头文件。
+- [C++ / Python 常用接口](#c--python-常用接口)
+  - [1. 顺序容器](#1-顺序容器)
+    - [1.1 C++](#11-c)
+    - [1.2 Python](#12-python)
+  - [2. 排序、反转与去重](#2-排序反转与去重)
+    - [2.1 C++](#21-c)
+    - [2.2 Python](#22-python)
+  - [3. 二分接口](#3-二分接口)
+    - [3.1 C++](#31-c)
+    - [3.2 Python](#32-python)
+  - [4. 哈希表、集合与计数](#4-哈希表集合与计数)
+    - [4.1 C++](#41-c)
+    - [4.2 Python](#42-python)
+  - [5. 堆、队列与双端队列](#5-堆队列与双端队列)
+    - [5.1 C++](#51-c)
+    - [5.2 Python](#52-python)
+  - [6. 字符串](#6-字符串)
+    - [6.1 C++](#61-c)
+    - [6.2 Python](#62-python)
+  - [7. 数值、位运算与初始化](#7-数值位运算与初始化)
+  - [参考资料](#参考资料)
+
+C++17 / Python 3 常用接口，按容器和操作分类，注明返回值、修改行为与复杂度。各片段独立；C++ 省略 `std::`，使用时包含对应头文件。
 
 ## 1. 顺序容器
 
@@ -25,6 +48,8 @@ math: true
 | 中间插入/删除 | `insert` / `erase` | `insert` / `pop(i)` | O(n) |
 | 截取副本 | 迭代器范围构造 | `a[l:r]` | O(r-l) |
 
+### 1.1 C++
+
 ```cpp
 #include <vector>
 using namespace std;
@@ -34,6 +59,8 @@ a.reserve(100);     // 改容量，不改 size
 a.resize(8, -1);    // 改长度，新增位置填 -1
 vector<vector<int>> grid(3, vector<int>(4, 0));
 ```
+
+### 1.2 Python
 
 ```python
 a = [0] * 5
@@ -46,6 +73,8 @@ b = a[:]                    # 一层副本
 C++ `vector` 扩容可能使已有迭代器、指针和引用失效。删除过程中不要继续使用被删除位置的旧迭代器。
 
 ## 2. 排序、反转与去重
+
+### 2.1 C++
 
 ```cpp
 #include <algorithm>
@@ -68,6 +97,8 @@ b.erase(unique(b.begin(), b.end()), b.end()); // 1 2 3
 
 比较器应使用严格比较，不能写 `x <= y`。`unique` 只把相邻重复元素移到逻辑末尾，不会自动缩短容器；全局去重通常先排序。
 
+### 2.2 Python
+
 ```python
 a = [(2, 5), (1, 3), (2, 1)]
 a.sort(key=lambda p: (-p[0], p[1]))
@@ -88,6 +119,8 @@ Python 排序稳定；C++ `sort` 不保证相等元素的原始顺序，需要�
 | 第一个 `> x` | `upper_bound` | `bisect_right` |
 | 等于 x 的个数 | 两个边界之差 | 两个边界之差 |
 
+### 3.1 C++
+
 ```cpp
 #include <algorithm>
 #include <vector>
@@ -101,6 +134,8 @@ int pos = int(l - a.begin());
 bool found = l != a.end() && *l == 2;
 ```
 
+### 3.2 Python
+
 ```python
 from bisect import bisect_left, bisect_right, insort
 
@@ -113,6 +148,8 @@ insort(a, 3)
 数组上的边界查询是 O(log n)，但 Python `insort` 还需要移动元素，整体是 O(n)。C++ `set/map` 应使用成员函数 `lower_bound`；通用算法在非随机访问迭代器上可能执行线性次数的迭代器移动。
 
 ## 4. 哈希表、集合与计数
+
+### 4.1 C++
 
 ```cpp
 #include <map>
@@ -131,6 +168,8 @@ auto it = values.lower_bound(2);     // 指向 3
 
 C++17 没有标准容器的 `contains` 成员函数，可用 `find`。`map/set` 查询和修改 O(log n)；`unordered_map/unordered_set` 平均 O(1)，最坏 O(n)。哈希集合不保证有序。
 
+### 4.2 Python
+
 ```python
 from collections import Counter, defaultdict
 
@@ -148,6 +187,8 @@ Python `dict/set` 查询与修改平均 O(1)，最坏可退化为 O(n)。`dict` 
 
 ## 5. 堆、队列与双端队列
 
+### 5.1 C++
+
 ```cpp
 #include <functional>
 #include <queue>
@@ -164,6 +205,8 @@ q.push(1);
 int front = q.front();
 q.pop();
 ```
+
+### 5.2 Python
 
 ```python
 import heapq
@@ -184,6 +227,8 @@ front = q.popleft()
 
 ## 6. 字符串
 
+### 6.1 C++
+
 ```cpp
 #include <string>
 using namespace std;
@@ -195,6 +240,8 @@ if (pos != string::npos) s.replace(pos, 2, "X");
 long long value = stoll("12345678900");
 string text = to_string(value);
 ```
+
+### 6.2 Python
 
 ```python
 s = "abcabc"
@@ -221,7 +268,7 @@ C++ 整数除法向零截断，Python `//` 向下取整，例如 `-3 / 2` 在 C+
 
 C++ 用 `numeric_limits<long long>::max() / 4` 等作为距离上界时，先确认它大于所有合法答案；不可达状态不能直接参与加法。`memset` 按字节写入，不能把整数数组通用地填成任意整数。
 
-## 参考
+## 参考资料
 
 - [Python 标准库：collections](https://docs.python.org/3/library/collections.html)
 - [Python 标准库：heapq](https://docs.python.org/3/library/heapq.html)

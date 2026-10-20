@@ -1,20 +1,62 @@
 ---
-title: "LLM 核心算子手撕：PyTorch / Python / C++"
+title: "LLM 核心算子手撕"
 date: 2026-10-20T15:20:00+08:00
+lastmod: 2026-10-20T16:00:00+08:00
 draft: false
 description: "面向笔试整理 Linear、Softmax、LayerNorm、RMSNorm、SwiGLU、RoPE、MHA/GQA、KV Cache 与交叉熵的三种实现"
-slug: "acm-llm-operators"
+slug: "llm-operator-implementations"
 tags: ["cpp", "python", "pytorch", "llm", "算子", "手撕"]
 categories: ["笔试重点"]
 comments: true
 math: true
 ---
 
-# LLM 核心算子手撕：PyTorch / Python / C++
+# LLM 核心算子手撕
 
-这篇按笔试中常见的拆解顺序整理：矩阵乘法、归约与归一化、激活、位置编码，再组合成 Attention。每个算子给出公式、形状和三种实现；PyTorch 使用张量基础操作，Python 使用列表和标准库，C++ 使用循环和标准容器。
+- [LLM 核心算子手撕](#llm-核心算子手撕)
+  - [1. 统一约定](#1-统一约定)
+    - [1.1 Python 标准库](#11-python-标准库)
+    - [1.2 PyTorch](#12-pytorch)
+    - [1.3 C++](#13-c)
+  - [2. MatMul 与 Linear](#2-matmul-与-linear)
+    - [2.1 PyTorch](#21-pytorch)
+    - [2.2 Python](#22-python)
+    - [2.3 C++](#23-c)
+  - [3. 稳定 Softmax 与反向](#3-稳定-softmax-与反向)
+    - [3.1 PyTorch](#31-pytorch)
+    - [3.2 Python](#32-python)
+    - [3.3 C++](#33-c)
+    - [3.4 反向计算](#34-反向计算)
+  - [4. LayerNorm 与 RMSNorm](#4-layernorm-与-rmsnorm)
+    - [4.1 PyTorch](#41-pytorch)
+    - [4.2 Python](#42-python)
+    - [4.3 C++](#43-c)
+  - [5. SiLU 与 SwiGLU](#5-silu-与-swiglu)
+    - [5.1 PyTorch](#51-pytorch)
+    - [5.2 Python](#52-python)
+    - [5.3 C++](#53-c)
+  - [6. RoPE 与通道配对](#6-rope-与通道配对)
+    - [6.1 PyTorch](#61-pytorch)
+    - [6.2 Python](#62-python)
+    - [6.3 C++](#63-c)
+  - [7. Scaled Dot-Product Attention](#7-scaled-dot-product-attention)
+    - [7.1 单 head 实现](#71-单-head-实现)
+    - [7.2 Causal mask 与 KV Cache 对齐](#72-causal-mask-与-kv-cache-对齐)
+    - [7.3 MHA、MQA 与 GQA](#73-mhamqa-与-gqa)
+    - [7.4 完整 MHA：投影、拆头、合头](#74-完整-mha投影拆头合头)
+  - [8. KV Cache：缓存 K/V，不缓存旧 Q](#8-kv-cache缓存-kv不缓存旧-q)
+    - [8.1 PyTorch](#81-pytorch)
+    - [8.2 Python](#82-python)
+    - [8.3 C++](#83-c)
+  - [9. 稳定交叉熵与 Next-token 对齐](#9-稳定交叉熵与-next-token-对齐)
+    - [9.1 PyTorch](#91-pytorch)
+    - [9.2 Python](#92-python)
+    - [9.3 C++](#93-c)
+  - [10. 验证要点](#10-验证要点)
 
-这里实现前向计算，并补充 Softmax 的反向公式。CPU 循环用于检查逻辑和回答手撕题；GPU 分块、流水线和 FlashAttention 见[LLM 算子优化系列](/p/llm-kernel-notes/)。
+常见 LLM 算子的 PyTorch、Python 标准库和 C++17 实现，包含公式、张量形状和边界条件。
+
+代码以前向计算为主，另列 Softmax 反向。GPU 分块、流水线与 FlashAttention 见 [LLM 算子优化](https://github.com/huluhuluu/llm-kernel-notes/blob/main/index.md)。
 
 ## 1. 统一约定
 
@@ -28,13 +70,17 @@ math: true
 
 矩阵非空且各行等长，维度满足公式要求。输入为有限实数，mask 位置允许用负无穷。PyTorch 接口支持文中说明的 batch 维；Python/C++ 为便于手写，默认按一行、一个 head 或一个请求处理，batch 在最外层循环即可。
 
-按顺序使用下方片段。Python 公共导入：
+### 1.1 Python 标准库
+
+公共导入：
 
 ```python
 import math
 ```
 
-PyTorch 公共导入与累加类型：
+### 1.2 PyTorch
+
+公共导入与累加类型：
 
 ```python
 import torch
@@ -43,7 +89,11 @@ def acc_torch(x):
     return x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
 ```
 
-归约通常将 FP16/BF16 提升到 FP32，最后转换回输入类型。FP32/FP64 保留原类型。C++17 公共头文件和类型：
+归约通常将 FP16/BF16 提升到 FP32，最后转换回输入类型。FP32/FP64 保留原类型。
+
+### 1.3 C++
+
+公共头文件和类型：
 
 ```cpp
 #include <algorithm>
@@ -67,7 +117,9 @@ $$
 
 Linear 按 PyTorch 的权重约定存储 `W[N,K]`，所以 `Y=XWᵀ+b`。不要把权重的存储形状误写成实际右操作数的形状。
 
-**PyTorch**，X 可为 `[...,K]`，bias 为 `[N]`：
+### 2.1 PyTorch
+
+X 可为 `[...,K]`，bias 为 `[N]`：
 
 ```python
 def linear_torch(x, weight, bias=None):
@@ -75,7 +127,9 @@ def linear_torch(x, weight, bias=None):
     return y if bias is None else y + bias
 ```
 
-**Python**，输入 X 为 `[M,K]`，weight 为 `[N,K]`：
+### 2.2 Python
+
+输入 X 为 `[M,K]`，weight 为 `[N,K]`：
 
 ```python
 def linear_py(x, weight, bias=None):
@@ -87,7 +141,7 @@ def linear_py(x, weight, bias=None):
     ]
 ```
 
-**C++**：
+### 2.3 C++
 
 ```cpp
 Mat linear_cpp(const Mat& x, const Mat& weight, const Vec& bias = {}) {
@@ -114,7 +168,9 @@ $$
 
 减去最大值不改变结果，可避免直接 `exp(1000)` 溢出。本文额外约定：一整行都被 mask 时返回全 0。这是一种显式边界语义；各框架或后端的处理可能不同。
 
-**PyTorch**，沿最后一维归约：
+### 3.1 PyTorch
+
+沿最后一维归约：
 
 ```python
 def softmax_torch(x):
@@ -127,7 +183,7 @@ def softmax_torch(x):
     return (e / denom).to(x.dtype)
 ```
 
-**Python**：
+### 3.2 Python
 
 ```python
 def softmax_py(row):
@@ -139,7 +195,7 @@ def softmax_py(row):
     return [x / total for x in e]
 ```
 
-**C++**：
+### 3.3 C++
 
 ```cpp
 Vec softmax_cpp(const Vec& row) {
@@ -156,7 +212,11 @@ Vec softmax_cpp(const Vec& row) {
 }
 ```
 
-单行时间 O(D)，空间 O(D)。假设上游梯度为 g，利用 Softmax 的 Jacobian 可化简为：
+单行时间 O(D)，空间 O(D)。
+
+### 3.4 反向计算
+
+假设上游梯度为 g，利用 Softmax 的 Jacobian 可化简为：
 
 $$
 \frac{\partial L}{\partial x_i}
@@ -165,17 +225,23 @@ $$
 
 不需要显式构造 D×D 的 Jacobian：
 
+#### 3.4.1 PyTorch
+
 ```python
 def softmax_backward_torch(p, grad):
     pw, gw = acc_torch(p), acc_torch(grad)
     return (pw * (gw - (pw * gw).sum(dim=-1, keepdim=True))).to(p.dtype)
 ```
 
+#### 3.4.2 Python
+
 ```python
 def softmax_backward_py(p, grad):
     dot = sum(a * b for a, b in zip(p, grad))
     return [a * (b - dot) for a, b in zip(p, grad)]
 ```
+
+#### 3.4.3 C++
 
 ```cpp
 Vec softmax_backward_cpp(const Vec& p, const Vec& grad) {
@@ -203,7 +269,7 @@ $$
 
 LayerNorm 的方差分母是 D，不是 D-1；PyTorch 对应 `unbiased=False` 的定义。这里统一显式传 `eps=1e-5`，对照框架时保持相同值。参见 [LayerNorm 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html)。
 
-**PyTorch**：
+### 4.1 PyTorch
 
 ```python
 def layernorm_torch(x, gamma, beta, eps=1e-5):
@@ -219,7 +285,9 @@ def rmsnorm_torch(x, gamma, eps=1e-5):
     return (y * gamma).to(x.dtype)
 ```
 
-**Python**，对一行计算：
+### 4.2 Python
+
+对一行计算：
 
 ```python
 def layernorm_py(row, gamma, beta, eps=1e-5):
@@ -233,7 +301,7 @@ def rmsnorm_py(row, gamma, eps=1e-5):
     return [x * inv * g for x, g in zip(row, gamma)]
 ```
 
-**C++**：
+### 4.3 C++
 
 ```cpp
 Vec layernorm_cpp(const Vec& row, const Vec& gamma, const Vec& beta,
@@ -270,7 +338,7 @@ $$
 
 门控后的张量为 `[...,F]`，再乘 `Wdown[D,F]` 回到 `[...,D]`。本文分别传入 gate/up，不依赖某个库的打包顺序。[GLU Variants](https://arxiv.org/abs/2002.05202) 讨论了这种门控激活结构。
 
-**PyTorch**：
+### 5.1 PyTorch
 
 ```python
 def swiglu_torch(gate, up):
@@ -282,7 +350,9 @@ def ffn_torch(x, w_gate, w_up, w_down):
     return linear_torch(hidden, w_down)
 ```
 
-**Python**，稳定 sigmoid 根据符号分支，避免很大的负数导致 `exp(-x)` 溢出：
+### 5.2 Python
+
+稳定 sigmoid 根据符号分支，避免很大的负数导致 `exp(-x)` 溢出：
 
 ```python
 def sigmoid_py(x):
@@ -300,7 +370,7 @@ def ffn_py(x, w_gate, w_up, w_down):
     return linear_py(hidden, w_down)
 ```
 
-**C++**：
+### 5.3 C++
 
 ```cpp
 double sigmoid_cpp(double x) {
@@ -325,7 +395,7 @@ Mat ffn_cpp(const Mat& x, const Mat& wg, const Mat& wu, const Mat& wd) {
 
 逐元素门控为 O(LF)，三个线性映射合计为 O(LDF)。`SiLU(gate*up)` 与 `SiLU(gate)*up` 不相同。
 
-## 6. RoPE：先确认通道配对方式
+## 6. RoPE 与通道配对
 
 本文使用相邻通道配对，d 为偶数，对第 i 对通道：
 
@@ -338,7 +408,9 @@ $$
 
 [RoFormer](https://arxiv.org/abs/2104.09864) 使用旋转编码位置。实际模型还可能以前后半区配对，或只旋转部分维度；配对和权重布局必须匹配。
 
-**PyTorch**，输入 `[...,L,d]`，positions 为 `[L]`，可以直接传 decode 的绝对位置：
+### 6.1 PyTorch
+
+输入 `[...,L,d]`，positions 为 `[L]`，可以直接传 decode 的绝对位置：
 
 ```python
 def rope_torch(x, positions, base=10000.0):
@@ -352,7 +424,9 @@ def rope_torch(x, positions, base=10000.0):
     return out.flatten(-2).to(x.dtype)
 ```
 
-**Python**，处理一个 token 的一个 head：
+### 6.2 Python
+
+处理一个 token 的一个 head：
 
 ```python
 def rope_py(row, position, base=10000.0):
@@ -366,7 +440,7 @@ def rope_py(row, position, base=10000.0):
     return out
 ```
 
-**C++**：
+### 6.3 C++
 
 ```cpp
 Vec rope_cpp(const Vec& row, int position, double base = 10000.0) {
@@ -394,7 +468,11 @@ $$
 
 先除以 `sqrt(d)`，再 Softmax；归约方向是 key 长度 Lkv。本文 mask 名为 `keep`，**True 表示可以参与 Attention**。每行全 False 时，沿用前文 Softmax 返回全 0 的约定。
 
-**PyTorch**，支持 `[B,H,L,d]`，keep 需能广播到 `[B,H,Lq,Lkv]`：
+### 7.1 单 head 实现
+
+#### 7.1.1 PyTorch
+
+支持 `[B,H,L,d]`，keep 需能广播到 `[B,H,Lq,Lkv]`：
 
 ```python
 def attention_torch(q, k, v, keep=None):
@@ -406,7 +484,9 @@ def attention_torch(q, k, v, keep=None):
     return (p @ acc_torch(v)).to(q.dtype)
 ```
 
-**Python**，先算一行 scores，再得到一行输出：
+#### 7.1.2 Python
+
+先算一行 scores，再得到一行输出：
 
 ```python
 def attention_py(q, k, v, keep=None):
@@ -423,7 +503,9 @@ def attention_py(q, k, v, keep=None):
     return output
 ```
 
-**C++**，mask 采用 `vector<vector<bool>>`：
+#### 7.1.3 C++
+
+mask 采用 `vector<vector<bool>>`：
 
 ```cpp
 Mat attention_cpp(const Mat& q, const Mat& k, const Mat& v,
@@ -449,7 +531,7 @@ Mat attention_cpp(const Mat& q, const Mat& k, const Mat& v,
 
 时间 O(Lq·Lkv·(d+dv))。PyTorch 这里显式保存 scores/P，中间空间 O(Lq·Lkv) 每 head；Python/C++ 按 query 行计算，额外工作空间 O(Lkv)，另有输出 O(Lq·dv)。不保存全矩阵不代表已经实现 FlashAttention 的分块复用。
 
-### 7.1 Causal mask 与 KV Cache 对齐
+### 7.2 Causal mask 与 KV Cache 对齐
 
 初始 prefill 中 `Lq=Lkv=L`，允许 `key_pos<=query_pos`，即主对角线及其下方。若 KV 包含过去缓存和本次追加的 Query，对齐到序列末尾：
 
@@ -459,6 +541,8 @@ $$
 
 三种构造方式：
 
+#### 7.2.1 PyTorch
+
 ```python
 def causal_keep_torch(lq, lkv, device):
     qpos = torch.arange(lq, device=device) + lkv - lq
@@ -466,10 +550,14 @@ def causal_keep_torch(lq, lkv, device):
     return kpos[None, :] <= qpos[:, None]
 ```
 
+#### 7.2.2 Python
+
 ```python
 def causal_keep_py(lq, lkv):
     return [[j <= lkv - lq + i for j in range(lkv)] for i in range(lq)]
 ```
+
+#### 7.2.3 C++
 
 ```cpp
 vector<vector<bool>> causal_keep_cpp(int lq, int lkv) {
@@ -484,7 +572,7 @@ vector<vector<bool>> causal_keep_cpp(int lq, int lkv) {
 
 对照 PyTorch `F.scaled_dot_product_attention` 时，布尔 mask 也是 True 表示保留，但 `nn.MultiheadAttention` 的布尔 mask 使用 True 表示屏蔽。SDPA 的非方阵 `is_causal=True` 使用左上对齐，和本文的追加场景不同，应传显式 `attn_mask`，并设置 `is_causal=False,dropout_p=0.0`。参见 [SDPA](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html) 与 [MultiheadAttention](https://docs.pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html)。
 
-### 7.2 MHA、MQA 与 GQA
+### 7.3 MHA、MQA 与 GQA
 
 | 形式 | head 数关系 |
 |------|-------------|
@@ -494,7 +582,9 @@ vector<vector<bool>> causal_keep_cpp(int lq, int lkv) {
 
 映射为 `kv_head=query_head//(Hq/Hkv)`，不要用 `query_head%Hkv`，二者对应不同的分组顺序。
 
-**PyTorch**，Q 为 `[B,Hq,Lq,d]`，K/V 为 `[B,Hkv,Lkv,d/dv]`：
+#### 7.3.1 PyTorch
+
+Q 为 `[B,Hq,Lq,d]`，K/V 为 `[B,Hkv,Lkv,d/dv]`：
 
 ```python
 def gqa_torch(q, k, v, keep=None):
@@ -504,7 +594,9 @@ def gqa_torch(q, k, v, keep=None):
     return attention_torch(q, kr, vr, keep)
 ```
 
-**Python**，这里输入不含 batch，为 `[H,L,d]`：
+#### 7.3.2 Python
+
+这里输入不含 batch，为 `[H,L,d]`：
 
 ```python
 def gqa_py(q, k, v, keep=None):
@@ -513,7 +605,7 @@ def gqa_py(q, k, v, keep=None):
             for h, query in enumerate(q)]
 ```
 
-**C++**：
+#### 7.3.3 C++
 
 ```cpp
 Heads gqa_cpp(const Heads& q, const Heads& k, const Heads& v,
@@ -528,11 +620,11 @@ Heads gqa_cpp(const Heads& q, const Heads& k, const Heads& v,
 
 要求 `Hq>=Hkv>0` 且 `Hq%Hkv==0`。PyTorch 复制 KV 是为了展示映射，实际高效 kernel 可以复用 KV 而不物理展开。对照输出时可先显式展开，再调用 SDPA，避免依赖某个后端的 GQA 支持范围。
 
-### 7.3 完整 MHA：投影、拆头、合头
+### 7.4 完整 MHA：投影、拆头、合头
 
 以下使用无 bias 的标准 MHA，输入 `X[B,L,D]`，四个权重都是 `[D,D]`，要求 D 能被 heads 整除。
 
-**PyTorch**：
+#### 7.4.1 PyTorch
 
 ```python
 def mha_torch(x, wq, wk, wv, wo, heads, keep=None):
@@ -545,7 +637,9 @@ def mha_torch(x, wq, wk, wv, wo, heads, keep=None):
     return linear_torch(merged, wo)
 ```
 
-**Python**，一个请求 `[L,D]`：
+#### 7.4.2 Python
+
+一个请求 `[L,D]`：
 
 ```python
 def mha_py(x, wq, wk, wv, wo, heads, keep=None):
@@ -558,7 +652,7 @@ def mha_py(x, wq, wk, wv, wo, heads, keep=None):
     return linear_py(merged, wo)
 ```
 
-**C++**：
+#### 7.4.3 C++
 
 ```cpp
 Mat mha_cpp(const Mat& x, const Mat& wq, const Mat& wk, const Mat& wv,
@@ -587,21 +681,27 @@ Mat mha_cpp(const Mat& x, const Mat& wq, const Mat& wk, const Mat& wv,
 
 每层缓存已经完成该层投影及所需位置编码的 K 和 V。新 token 只产生自己的 Q/K/V，将新 K/V 追加到历史后，当前 Q 对完整缓存做 Attention。
 
-**PyTorch**，cache 和 new 为 `[B,Hkv,L,d]`，这里 K/V 的最后一维均设为 d：
+### 8.1 PyTorch
+
+cache 和 new 为 `[B,Hkv,L,d]`，这里 K/V 的最后一维均设为 d：
 
 ```python
 def append_kv_torch(cache_k, cache_v, new_k, new_v):
     return torch.cat((cache_k, new_k), dim=-2), torch.cat((cache_v, new_v), dim=-2)
 ```
 
-**Python**，一个 head，沿序列维追加：
+### 8.2 Python
+
+一个 head，沿序列维追加：
 
 ```python
 def append_kv_py(cache_k, cache_v, new_k, new_v):
     return cache_k + new_k, cache_v + new_v
 ```
 
-**C++**，一个 head：
+### 8.3 C++
+
+一个 head：
 
 ```cpp
 pair<Mat, Mat> append_kv_cpp(const Mat& cache_k, const Mat& cache_v,
@@ -630,7 +730,7 @@ $$
 
 直接使用 logits 计算，避免先 Softmax 后对极小概率取 log。下面统一输入 `[N,C]`，目标为 `[N]`，按 N 求均值，不处理 ignore index、类别权重或 label smoothing。
 
-**PyTorch**：
+### 9.1 PyTorch
 
 ```python
 def cross_entropy_torch(logits, targets):
@@ -641,7 +741,7 @@ def cross_entropy_torch(logits, targets):
     return (log_denom - selected).mean()
 ```
 
-**Python**：
+### 9.2 Python
 
 ```python
 def cross_entropy_py(logits, targets):
@@ -653,7 +753,7 @@ def cross_entropy_py(logits, targets):
     return sum(losses) / len(losses)
 ```
 
-**C++**：
+### 9.3 C++
 
 ```cpp
 double cross_entropy_cpp(const Mat& logits, const vector<int>& targets) {
@@ -672,7 +772,7 @@ double cross_entropy_cpp(const Mat& logits, const vector<int>& targets) {
 
 Causal LM 中，位置 i 的 logits 预测下一个 token。若输入标签尚未由模型内部 shift，应对 `logits[:,:-1,:]` 和 `token_ids[:,1:]` 计算损失，而不是与同位置 token 对齐。带 padding 时只对有效 target 求均值。框架参考见 [cross_entropy 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html)。
 
-## 10. 手写后的检查顺序
+## 10. 验证要点
 
 | 算子 | 最小检查 |
 |------|----------|

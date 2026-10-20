@@ -1,6 +1,7 @@
 ---
 title: "ACM 输入处理：C++ / Python"
 date: 2026-10-20T12:00:00+08:00
+lastmod: 2026-10-20T16:00:00+08:00
 draft: false
 description: "按输入格式整理 C++ 和 Python 的 ACM 模板，区分 token、整行、多组数据和 EOF"
 slug: "acm-input-cpp-python"
@@ -12,9 +13,31 @@ math: true
 
 # ACM 输入处理：C++ / Python
 
-ACM 模式需要自己读输入、调用算法并输出结果。读题时先确定三件事：有几组数据，空白是否有含义，一组数据在哪里结束。不要根据样例的换行猜输入格式。
+- [ACM 输入处理：C++ / Python](#acm-输入处理c--python)
+  - [1. 按 token 读取与按行读取](#1-按-token-读取与按行读取)
+  - [2. 单组数据：n 后面跟 n 个数](#2-单组数据n-后面跟-n-个数)
+    - [2.1 C++](#21-c)
+    - [2.2 Python](#22-python)
+  - [3. 首行给定 T 组数据](#3-首行给定-t-组数据)
+    - [3.1 C++](#31-c)
+    - [3.2 Python](#32-python)
+  - [4. 读到 EOF：每组两个整数](#4-读到-eof每组两个整数)
+    - [4.1 C++](#41-c)
+    - [4.2 Python](#42-python)
+  - [5. 哨兵结束：遇到 0 0 停止](#5-哨兵结束遇到-0-0-停止)
+    - [5.1 C++](#51-c)
+    - [5.2 Python](#52-python)
+  - [6. 每行数量不定](#6-每行数量不定)
+    - [6.1 C++](#61-c)
+    - [6.2 Python](#62-python)
+  - [7. 整行字符串与混合输入](#7-整行字符串与混合输入)
+    - [7.1 C++](#71-c)
+    - [7.2 Python](#72-python)
+  - [8. 矩阵、字符网格与逗号分隔](#8-矩阵字符网格与逗号分隔)
+  - [9. 输出与提交前检查](#9-输出与提交前检查)
+  - [参考资料](#参考资料)
 
-以下各代码块是独立示例。C++ 使用 C++17；Python 使用 Python 3。
+ACM 模式由程序处理输入输出。读取前确认数据组数、分隔规则和结束条件。以下按常见格式列出 C++17 / Python 3 模板，各代码块独立运行。
 
 ## 1. 按 token 读取与按行读取
 
@@ -37,6 +60,8 @@ ACM 模式需要自己读输入、调用算法并输出结果。读题时先确�
 4 5
 ```
 
+### 2.1 C++
+
 ```cpp
 #include <iostream>
 #include <vector>
@@ -57,6 +82,8 @@ int main() {
 }
 ```
 
+### 2.2 Python
+
 ```python
 import sys
 
@@ -71,6 +98,8 @@ Python 这里假定输入非空且符合题意。整体读取便于跨行取数�
 ## 3. 首行给定 T 组数据
 
 每组先读 `n`，再读 `n` 个数。数组、答案和计数器应在每组内部重新初始化。
+
+### 3.1 C++
 
 ```cpp
 #include <iostream>
@@ -94,6 +123,8 @@ int main() {
 }
 ```
 
+### 3.2 Python
+
 ```python
 import sys
 
@@ -111,6 +142,8 @@ sys.stdout.write("\n".join(answers))
 
 EOF 是文件结束。C++ 直接检查读取是否成功，不要写 `while (!cin.eof())`，因为 EOF 标志通常在读取失败后才设置。
 
+### 4.1 C++
+
 ```cpp
 #include <iostream>
 using namespace std;
@@ -122,6 +155,8 @@ int main() {
 ```
 
 如果题目只要求每组两个数，不保证每组恰好一行，Python 可以按 token 流读取：
+
+### 4.2 Python
 
 ```python
 import sys
@@ -143,6 +178,8 @@ for a in it:
 
 先成功读取，再检查结束标志。结束标志不参与计算。
 
+### 5.1 C++
+
 ```cpp
 #include <iostream>
 using namespace std;
@@ -155,6 +192,8 @@ int main() {
     }
 }
 ```
+
+### 5.2 Python
 
 ```python
 import sys
@@ -171,6 +210,8 @@ for line in sys.stdin.buffer:
 ## 6. 每行数量不定
 
 题目要求对每行分别求和时，换行就是一组数据的边界，不能把整个文件 `split()` 后丢掉行信息。
+
+### 6.1 C++
 
 ```cpp
 #include <iostream>
@@ -189,6 +230,8 @@ int main() {
 }
 ```
 
+### 6.2 Python
+
 ```python
 import sys
 
@@ -199,6 +242,8 @@ for line in sys.stdin.buffer:
 ## 7. 整行字符串与混合输入
 
 `cin >> n` 会留下后面的换行。若题目规定 `n` 独占一行，先丢弃该行剩余内容，再读后面的完整行：
+
+### 7.1 C++
 
 ```cpp
 #include <iostream>
@@ -219,6 +264,8 @@ int main() {
 ```
 
 `getline(cin >> ws, line)` 会跳过所有前导空白，包括空行和行首空格。只有这些内容确实可以忽略时才使用。
+
+### 7.2 Python
 
 ```python
 import sys
@@ -259,7 +306,7 @@ Python 批量输出用 `"\n".join(...)`，元素需要先转为字符串；矩�
 - 不额外输出提示语、调试信息或多余空格。
 - 字符串的空格、空行、大小写是否保留，应由题目规定。
 
-## 参考
+## 参考资料
 
 - [Python：sys.stdin 与标准流](https://docs.python.org/3/library/sys.html#sys.stdin)
 - [Python：str.split](https://docs.python.org/3/library/stdtypes.html#str.split)

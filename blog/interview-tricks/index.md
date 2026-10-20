@@ -1,10 +1,11 @@
 ---
 title: "笔试常见技巧"
 date: 2026-10-20T12:30:00+08:00
+lastmod: 2026-10-20T16:00:00+08:00
 draft: false
 description: "整理 lowbit、树状数组、快速幂、筛法、逆元、组合数、离散化和子集枚举的用法与前提"
-slug: "acm-common-tricks"
-tags: ["cpp", "python", "acm", "数论", "位运算"]
+slug: "interview-tricks"
+tags: ["cpp", "python", "数论", "位运算"]
 categories: ["笔试重点"]
 comments: true
 math: true
@@ -12,7 +13,23 @@ math: true
 
 # 笔试常见技巧
 
-技巧通常有明确的使用前提：lowbit 对应二进制结构，快速幂要求运算可结合，模逆元要求互质。先判断前提，再套代码。以下 C++ 片段使用 C++17，并假定已经包含相应头文件；Python 使用 Python 3。
+- [笔试常见技巧](#笔试常见技巧)
+  - [1. lowbit 与删除最低位的 1](#1-lowbit-与删除最低位的-1)
+  - [2. 树状数组：单点修改、前缀求和](#2-树状数组单点修改前缀求和)
+  - [3. 快速幂](#3-快速幂)
+    - [3.1 C++](#31-c)
+    - [3.2 Python](#32-python)
+  - [4. 最大公约数与扩展欧几里得](#4-最大公约数与扩展欧几里得)
+  - [5. 模逆元](#5-模逆元)
+  - [6. 埃氏筛与线性筛](#6-埃氏筛与线性筛)
+    - [6.1 Python](#61-python)
+    - [6.2 C++](#62-c)
+  - [7. 阶乘与逆阶乘求组合数](#7-阶乘与逆阶乘求组合数)
+  - [8. 离散化](#8-离散化)
+  - [9. 子集枚举与整除向上取整](#9-子集枚举与整除向上取整)
+  - [参考资料](#参考资料)
+
+位运算与数论模板，包括 lowbit、树状数组、快速幂、筛法、逆元与组合数。各节注明使用前提；代码使用 C++17 / Python 3，C++ 片段需包含相应头文件。
 
 ## 1. lowbit 与删除最低位的 1
 
@@ -75,6 +92,8 @@ class Fenwick:
 
 指数的二进制分解把 O(e) 次乘法减少为 O(log e) 次。下面限定 `e>=0`、`1<=mod<=2^31-1`，因此两个模内数的乘积可放进有符号 64 位整数。
 
+### 3.1 C++
+
 ```cpp
 long long mod_pow(long long a, long long e, long long mod) {
     a %= mod;
@@ -88,6 +107,8 @@ long long mod_pow(long long a, long long e, long long mod) {
     return result;
 }
 ```
+
+### 3.2 Python
 
 ```python
 answer = pow(3, 100, 1_000_000_007)
@@ -115,7 +136,7 @@ def extended_gcd(a, b):
 
 最小公倍数可写为 `a // gcd(a,b) * b`，先除后乘降低中间值；若两数都为 0，需要单独约定结果。C++ 即使先除再乘，最终结果仍可能溢出。
 
-## 5. 逆元：取模后不能直接除
+## 5. 模逆元
 
 模 $m$ 下，$a^{-1}$ 满足 $aa^{-1}\equiv1\pmod m$。当且仅当 `gcd(a,m)=1` 时存在逆元。
 
@@ -144,6 +165,8 @@ Python 3.8+ 也支持 `pow(a,-1,mod)`，不互质会抛出 `ValueError`。不要
 
 埃氏筛从每个质数的平方开始标记，因为更小的倍数已经被更小质因子处理。
 
+### 6.1 Python
+
 ```python
 from math import isqrt
 
@@ -163,6 +186,8 @@ def sieve(n):
 时间 O(n log log n)，空间 O(n)。C++ 判断 `i*i<=n` 时要注意乘法溢出，可提升类型或使用 `i<=n/i`。
 
 线性筛保存最小质因子，每个合数只由其最小质因子对应的分解标记一次：
+
+### 6.2 C++
 
 ```cpp
 vector<int> smallest_prime_factor(int n) {
@@ -242,7 +267,7 @@ while True:
 
 对 `a>=0,b>0`，`ceil(a/b)=(a+b-1)//b`。C++ 的 `a+b-1` 可能溢出，可写 `a/b + (a%b != 0)`。Python 对任意整数 `a`、正整数 `b` 可写 `-(-a//b)`；负数情况下不能直接照搬正数模板。
 
-## 参考
+## 参考资料
 
 - [Python 内置函数：pow](https://docs.python.org/3/library/functions.html#pow)
 - [Python 标准库：math](https://docs.python.org/3/library/math.html)
