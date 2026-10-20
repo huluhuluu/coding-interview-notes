@@ -1,7 +1,7 @@
 ---
 title: "笔试重点"
 date: 2026-10-20T12:00:00+08:00
-lastmod: 2026-10-20T16:15:00+08:00
+lastmod: 2026-10-20T16:40:00+08:00
 draft: false
 description: "C++ / Python 笔试备忘：ACM 输入、常用接口、算法与数论、LLM 算子和模型结构"
 slug: "coding-interview-notes"
@@ -24,7 +24,9 @@ C++、Python 笔试备忘，记录输入处理、常用接口、算法与数论�
 | 文章 | 说明 | 状态 |
 |------|------|------|
 | [ACM 输入处理：C++ / Python](blog/acm-input-cpp-python/index.md) | 单组、多组、EOF、整行、矩阵与字符串输入 | ✅ 完成 |
-| [C++ / Python 常用接口](blog/cpp-python-apis/index.md) | 容器、排序、二分、堆、字符串与计数 | ✅ 完成 |
+| [C++ 常用接口](blog/cpp-apis/index.md) | vector、排序、二分、string.substr、字符串修改与标准算法 | ✅ 完成 |
+| [Python 常用接口](blog/python-apis/index.md) | 列表、切片、字符串、字典、heapq、deque 与遍历 | ✅ 完成 |
+| [NumPy / PyTorch 常用操作](blog/numpy-torch-apis/index.md) | 索引、广播、维度变换、矩阵乘、数据转换与梯度 | ✅ 完成 |
 
 ### 算法与技巧
 

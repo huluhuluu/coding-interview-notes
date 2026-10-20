@@ -1,7 +1,7 @@
 ---
 title: "笔试常见技巧"
 date: 2026-10-20T12:30:00+08:00
-lastmod: 2026-10-20T16:00:00+08:00
+lastmod: 2026-10-20T16:40:00+08:00
 draft: false
 description: "整理 lowbit、树状数组、快速幂、筛法、逆元、组合数、离散化和子集枚举的用法与前提"
 slug: "interview-tricks"
@@ -43,13 +43,13 @@ x & (x - 1)   =  8 = 1000₂
 
 ```cpp
 unsigned long long lowbit(unsigned long long x) {
-    return x & (0ULL - x);
+    return x & (0ULL - x); // 按无符号位宽回绕，避免有符号取负溢出
 }
 
 int count_bits(unsigned long long x) {
     int count = 0;
     while (x) {
-        x &= x - 1;
+        x &= x - 1;       // 每轮清除最低位的一个 1
         ++count;
     }
     return count;
@@ -72,14 +72,14 @@ class Fenwick:
         # 前提：1 <= i <= n
         while i <= self.n:
             self.tree[i] += delta
-            i += i & -i
+            i += i & -i  # 向包含当前区间的父节点更新
 
     def prefix(self, i):
         # 返回 [1, i] 的和，允许 i=0
         result = 0
         while i > 0:
             result += self.tree[i]
-            i -= i & -i
+            i -= i & -i  # 去掉已统计的末尾区间
         return result
 
     def range_sum(self, left, right):
@@ -100,9 +100,9 @@ long long mod_pow(long long a, long long e, long long mod) {
     if (a < 0) a += mod;
     long long result = 1 % mod;
     while (e > 0) {
-        if (e & 1) result = result * a % mod;
-        a = a * a % mod;
-        e >>= 1;
+        if (e & 1) result = result * a % mod; // 指数当前二进制位为 1，乘入对应幂
+        a = a * a % mod;                     // 下一位对应的幂翻倍
+        e >>= 1;                             // 处理下一二进制位
     }
     return result;
 }
@@ -129,7 +129,7 @@ def extended_gcd(a, b):
     while r:
         q = old_r // r
         old_r, r = r, old_r - q * r
-        old_x, x = x, old_x - q * x
+        old_x, x = x, old_x - q * x # 同步更新系数，保持 r=a*x+b*y 的关系
         old_y, y = y, old_y - q * y
     return old_r, old_x, old_y
 ```
@@ -156,7 +156,7 @@ def mod_inverse(a, mod):
     g, x, _ = extended_gcd(a % mod, mod)
     if g != 1:
         raise ValueError("inverse does not exist")
-    return x % mod
+    return x % mod # 将可能为负的系数规范到 [0,mod)
 ```
 
 Python 3.8+ 也支持 `pow(a,-1,mod)`，不互质会抛出 `ValueError`。不要对合数模数直接套 `a^(mod-2)`。例如 2 在模 6 下没有逆元，模意义下的“除以 2”无法唯一成立。
@@ -178,7 +178,7 @@ def sieve(n):
         prime[1] = 0
     for p in range(2, isqrt(n) + 1):
         if prime[p]:
-            for multiple in range(p * p, n + 1, p):
+            for multiple in range(p * p, n + 1, p): # 更小倍数已被较小质因子处理
                 prime[multiple] = 0
     return prime
 ```
@@ -198,7 +198,7 @@ vector<int> smallest_prime_factor(int n) {
             primes.push_back(i);
         }
         for (int p : primes) {
-            if (p > spf[i] || p > n / i) break;
+            if (p > spf[i] || p > n / i) break; // 限制最小质因子，并避免 p*i 溢出
             spf[p * i] = p;
         }
     }
@@ -224,9 +224,9 @@ def combination_table(n, p):
     for i in range(1, n + 1):
         fact[i] = fact[i - 1] * i % p
     invfact = [1] * (n + 1)
-    invfact[n] = pow(fact[n], p - 2, p)
+    invfact[n] = pow(fact[n], p - 2, p) # 只求一次模幂，再反推其余逆阶乘
     for i in range(n, 0, -1):
-        invfact[i - 1] = invfact[i] * i % p
+        invfact[i - 1] = invfact[i] * i % p # 由 i! = i*(i-1)! 得到递推关系
 
     def choose(a, b):
         if b < 0 or b > a:
@@ -260,7 +260,7 @@ while True:
     # 处理 sub，包含空集 0
     if sub == 0:
         break
-    sub = (sub - 1) & mask
+    sub = (sub - 1) & mask # 限制在 mask 的置位范围内，得到下一个子集
 ```
 
 单个掩码有 k 个 1 时枚举 O(2^k) 个子集；枚举 n 位所有掩码的所有子集，总数为 O(3^n)。不要忽略外层枚举的成本。

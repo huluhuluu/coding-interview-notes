@@ -1,7 +1,7 @@
 ---
 title: "LLM 核心算子手撕"
 date: 2026-10-20T15:20:00+08:00
-lastmod: 2026-10-20T16:00:00+08:00
+lastmod: 2026-10-20T16:40:00+08:00
 draft: false
 description: "面向笔试整理 Linear、Softmax、LayerNorm、RMSNorm、SwiGLU、RoPE、MHA/GQA、KV Cache 与交叉熵的三种实现"
 slug: "llm-operator-implementations"
@@ -86,6 +86,7 @@ import math
 import torch
 
 def acc_torch(x):
+    # 半精度输入提升到 FP32 做归约，保留 FP64 校验输入的精度。
     return x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
 ```
 
@@ -123,7 +124,7 @@ X 可为 `[...,K]`，bias 为 `[N]`：
 
 ```python
 def linear_torch(x, weight, bias=None):
-    y = x @ weight.transpose(-1, -2)
+    y = x @ weight.transpose(-1, -2) # [...,K] @ [K,N] -> [...,N]
     return y if bias is None else y + bias
 ```
 
@@ -133,6 +134,7 @@ def linear_torch(x, weight, bias=None):
 
 ```python
 def linear_py(x, weight, bias=None):
+    # 每个输出是输入行与一个权重行的点积，bias 按输出通道加入。
     return [
         [sum(a * b for a, b in zip(row, w))
          + (0.0 if bias is None else bias[j])
@@ -145,6 +147,7 @@ def linear_py(x, weight, bias=None):
 
 ```cpp
 Mat linear_cpp(const Mat& x, const Mat& weight, const Vec& bias = {}) {
+    // x 为 [M,K]，weight 按 [N,K] 存储，输出为 [M,N]。
     int m = int(x.size()), n = int(weight.size()), k = int(x[0].size());
     Mat y(m, Vec(n, 0.0));
     for (int i = 0; i < m; ++i)
@@ -175,11 +178,11 @@ $$
 ```python
 def softmax_torch(x):
     work = acc_torch(x)
-    maximum = work.amax(dim=-1, keepdim=True)
+    maximum = work.amax(dim=-1, keepdim=True) # 沿每行最后一维归约，保留广播维
     maximum = torch.where(torch.isneginf(maximum), 0.0, maximum)
     e = (work - maximum).exp()
     denom = e.sum(dim=-1, keepdim=True)
-    denom = torch.where(denom == 0, 1.0, denom)
+    denom = torch.where(denom == 0, 1.0, denom) # 全 mask 行的分子为 0，避免 0/0
     return (e / denom).to(x.dtype)
 ```
 
@@ -190,7 +193,7 @@ def softmax_py(row):
     maximum = max(row)
     if maximum == -math.inf:
         return [0.0] * len(row)
-    e = [math.exp(x - maximum) for x in row]
+    e = [math.exp(x - maximum) for x in row] # 减最大值，使指数不大于 0
     total = sum(e)
     return [x / total for x in e]
 ```
@@ -204,7 +207,7 @@ Vec softmax_cpp(const Vec& row) {
     if (maximum == -numeric_limits<double>::infinity()) return p;
     double total = 0.0;
     for (int i = 0; i < int(row.size()); ++i) {
-        p[i] = exp(row[i] - maximum);
+        p[i] = exp(row[i] - maximum); // 先平移再求指数，避免大正数导致溢出
         total += p[i];
     }
     for (double& x : p) x /= total;
@@ -229,6 +232,7 @@ $$
 
 ```python
 def softmax_backward_torch(p, grad):
+    # 先计算每行 sum(p*grad)，避免构造完整 Jacobian。
     pw, gw = acc_torch(p), acc_torch(grad)
     return (pw * (gw - (pw * gw).sum(dim=-1, keepdim=True))).to(p.dtype)
 ```
@@ -237,7 +241,7 @@ def softmax_backward_torch(p, grad):
 
 ```python
 def softmax_backward_py(p, grad):
-    dot = sum(a * b for a, b in zip(p, grad))
+    dot = sum(a * b for a, b in zip(p, grad)) # Jacobian 收缩后的公共标量
     return [a * (b - dot) for a, b in zip(p, grad)]
 ```
 
@@ -245,6 +249,7 @@ def softmax_backward_py(p, grad):
 
 ```cpp
 Vec softmax_backward_cpp(const Vec& p, const Vec& grad) {
+    // grad 是上游梯度，dot 为 sum(p_j*grad_j)。
     double dot = 0.0;
     for (int i = 0; i < int(p.size()); ++i) dot += p[i] * grad[i];
     Vec dx(p.size());
@@ -275,11 +280,12 @@ LayerNorm 的方差分母是 D，不是 D-1；PyTorch 对应 `unbiased=False` �
 def layernorm_torch(x, gamma, beta, eps=1e-5):
     work = acc_torch(x)
     centered = work - work.mean(dim=-1, keepdim=True)
-    var = centered.square().mean(dim=-1, keepdim=True)
+    var = centered.square().mean(dim=-1, keepdim=True) # 方差除以 D，不做无偏修正
     y = centered * torch.rsqrt(var + eps)
     return (y * gamma + beta).to(x.dtype)
 
 def rmsnorm_torch(x, gamma, eps=1e-5):
+    # RMSNorm 不减均值，按最后一维计算均方根。
     work = acc_torch(x)
     y = work * torch.rsqrt(work.square().mean(dim=-1, keepdim=True) + eps)
     return (y * gamma).to(x.dtype)
@@ -292,11 +298,12 @@ def rmsnorm_torch(x, gamma, eps=1e-5):
 ```python
 def layernorm_py(row, gamma, beta, eps=1e-5):
     mean = sum(row) / len(row)
-    var = sum((x - mean) ** 2 for x in row) / len(row)
+    var = sum((x - mean) ** 2 for x in row) / len(row) # 对齐 LayerNorm 的总体方差
     inv = 1.0 / math.sqrt(var + eps)
     return [(x - mean) * inv * g + b for x, g, b in zip(row, gamma, beta)]
 
 def rmsnorm_py(row, gamma, eps=1e-5):
+    # eps 放在根号内，避免零输入时除零。
     inv = 1.0 / math.sqrt(sum(x * x for x in row) / len(row) + eps)
     return [x * inv * g for x, g in zip(row, gamma)]
 ```
@@ -310,7 +317,7 @@ Vec layernorm_cpp(const Vec& row, const Vec& gamma, const Vec& beta,
     for (double x : row) mean += x;
     mean /= row.size();
     for (double x : row) var += (x - mean) * (x - mean);
-    double inv = 1.0 / sqrt(var / row.size() + eps);
+    double inv = 1.0 / sqrt(var / row.size() + eps); // 先归约整行，再统一缩放
     Vec y(row.size());
     for (int i = 0; i < int(row.size()); ++i)
         y[i] = (row[i] - mean) * inv * gamma[i] + beta[i];
@@ -318,6 +325,7 @@ Vec layernorm_cpp(const Vec& row, const Vec& gamma, const Vec& beta,
 }
 
 Vec rmsnorm_cpp(const Vec& row, const Vec& gamma, double eps = 1e-5) {
+    // 统计平方和，不做中心化。
     double square_sum = 0.0;
     for (double x : row) square_sum += x * x;
     double inv = 1.0 / sqrt(square_sum / row.size() + eps);
@@ -342,10 +350,12 @@ $$
 
 ```python
 def swiglu_torch(gate, up):
+    # SiLU 仅作用于 gate，随后与 up 逐元素相乘。
     work = acc_torch(gate)
     return (work * torch.sigmoid(work) * acc_torch(up)).to(gate.dtype)
 
 def ffn_torch(x, w_gate, w_up, w_down):
+    # Gate/Up 把 D 映射到 F，Down 再把 F 映射回 D。
     hidden = swiglu_torch(linear_torch(x, w_gate), linear_torch(x, w_up))
     return linear_torch(hidden, w_down)
 ```
@@ -358,13 +368,15 @@ def ffn_torch(x, w_gate, w_up, w_down):
 def sigmoid_py(x):
     if x >= 0:
         return 1.0 / (1.0 + math.exp(-x))
-    e = math.exp(x)
+    e = math.exp(x) # x<0 时使用 exp(x)，避免计算很大的 exp(-x)
     return e / (1.0 + e)
 
 def swiglu_py(gate, up):
+    # 两个输入向量同形状；乘法按通道进行。
     return [g * sigmoid_py(g) * u for g, u in zip(gate, up)]
 
 def ffn_py(x, w_gate, w_up, w_down):
+    # 每行独立执行门控，再统一通过 Down 投影。
     gate, up = linear_py(x, w_gate), linear_py(x, w_up)
     hidden = [swiglu_py(g, u) for g, u in zip(gate, up)]
     return linear_py(hidden, w_down)
@@ -375,11 +387,12 @@ def ffn_py(x, w_gate, w_up, w_down):
 ```cpp
 double sigmoid_cpp(double x) {
     if (x >= 0.0) return 1.0 / (1.0 + exp(-x));
-    double e = exp(x);
+    double e = exp(x); // 负数分支避免指数溢出
     return e / (1.0 + e);
 }
 
 Vec swiglu_cpp(const Vec& gate, const Vec& up) {
+    // gate/up 都是 F 维，输出也为 F 维。
     Vec y(gate.size());
     for (int i = 0; i < int(gate.size()); ++i)
         y[i] = gate[i] * sigmoid_cpp(gate[i]) * up[i];
@@ -387,6 +400,7 @@ Vec swiglu_cpp(const Vec& gate, const Vec& up) {
 }
 
 Mat ffn_cpp(const Mat& x, const Mat& wg, const Mat& wu, const Mat& wd) {
+    // 三组权重分别负责 Gate、Up、Down。
     Mat gate = linear_cpp(x, wg), up = linear_cpp(x, wu);
     for (int i = 0; i < int(gate.size()); ++i) gate[i] = swiglu_cpp(gate[i], up[i]);
     return linear_cpp(gate, wd);
@@ -419,9 +433,9 @@ def rope_torch(x, positions, base=10000.0):
     freq = base ** (-torch.arange(0, d, 2, device=x.device, dtype=work.dtype) / d)
     angles = positions.to(device=x.device, dtype=work.dtype)[:, None] * freq[None, :]
     c, s = angles.cos(), angles.sin()
-    even, odd = work[..., 0::2], work[..., 1::2]
+    even, odd = work[..., 0::2], work[..., 1::2] # 相邻通道配对，不改变前导维
     out = torch.stack((even * c - odd * s, even * s + odd * c), dim=-1)
-    return out.flatten(-2).to(x.dtype)
+    return out.flatten(-2).to(x.dtype) # 将 [d/2,2] 合回 d
 ```
 
 ### 6.2 Python
@@ -433,7 +447,7 @@ def rope_py(row, position, base=10000.0):
     d = len(row)
     out = [0.0] * d
     for i in range(0, d, 2):
-        angle = position * base ** (-i / d)
+        angle = position * base ** (-i / d) # i=0,2,...，对应每一对通道的频率
         c, s = math.cos(angle), math.sin(angle)
         out[i] = row[i] * c - row[i + 1] * s
         out[i + 1] = row[i] * s + row[i + 1] * c
@@ -450,7 +464,7 @@ Vec rope_cpp(const Vec& row, int position, double base = 10000.0) {
         double angle = position * pow(base, -double(i) / d);
         double c = cos(angle), s = sin(angle);
         out[i] = row[i] * c - row[i + 1] * s;
-        out[i + 1] = row[i] * s + row[i + 1] * c;
+        out[i + 1] = row[i] * s + row[i + 1] * c; // 从原 row 读取，避免覆盖另一通道
     }
     return out;
 }
@@ -476,10 +490,11 @@ $$
 
 ```python
 def attention_torch(q, k, v, keep=None):
+    # Q/K 的末维为 d；输出序列长度为 Lq，输出末维来自 V。
     scores = acc_torch(q) @ acc_torch(k).transpose(-1, -2)
     scores = scores / math.sqrt(q.shape[-1])
     if keep is not None:
-        scores = scores.masked_fill(~keep, -torch.inf)
+        scores = scores.masked_fill(~keep, -torch.inf) # keep=True 表示可见
     p = softmax_torch(scores)
     return (p @ acc_torch(v)).to(q.dtype)
 ```
@@ -490,6 +505,7 @@ def attention_torch(q, k, v, keep=None):
 
 ```python
 def attention_py(q, k, v, keep=None):
+    # 逐 Query 行计算，工作区只保存当前一行的 Lkv 个分数。
     d, dv = len(q[0]), len(v[0])
     output = []
     for i, query in enumerate(q):
@@ -498,7 +514,7 @@ def attention_py(q, k, v, keep=None):
             allowed = keep is None or keep[i][j]
             score = sum(a * b for a, b in zip(query, key)) / math.sqrt(d)
             scores.append(score if allowed else -math.inf)
-        p = softmax_py(scores)
+        p = softmax_py(scores) # 沿 key 位置归一化，再对 V 加权求和
         output.append([sum(p[j] * v[j][c] for j in range(len(v))) for c in range(dv)])
     return output
 ```
@@ -510,6 +526,7 @@ mask 采用 `vector<vector<bool>>`：
 ```cpp
 Mat attention_cpp(const Mat& q, const Mat& k, const Mat& v,
                   const vector<vector<bool>>& keep = {}) {
+    // q:[Lq,d]，k:[Lkv,d]，v:[Lkv,dv]，输出:[Lq,dv]。
     int lq = int(q.size()), lk = int(k.size());
     int d = int(q[0].size()), dv = int(v[0].size());
     Mat output(lq, Vec(dv, 0.0));
@@ -545,7 +562,7 @@ $$
 
 ```python
 def causal_keep_torch(lq, lkv, device):
-    qpos = torch.arange(lq, device=device) + lkv - lq
+    qpos = torch.arange(lq, device=device) + lkv - lq # Query 对齐到 KV 序列末尾
     kpos = torch.arange(lkv, device=device)
     return kpos[None, :] <= qpos[:, None]
 ```
@@ -554,6 +571,7 @@ def causal_keep_torch(lq, lkv, device):
 
 ```python
 def causal_keep_py(lq, lkv):
+    # j 不超过 Query 的绝对位置；单 token decode 可见全部已给定 KV。
     return [[j <= lkv - lq + i for j in range(lkv)] for i in range(lq)]
 ```
 
@@ -561,6 +579,7 @@ def causal_keep_py(lq, lkv):
 
 ```cpp
 vector<vector<bool>> causal_keep_cpp(int lq, int lkv) {
+    // 追加场景的 Query 起始绝对位置为 lkv-lq。
     vector<vector<bool>> keep(lq, vector<bool>(lkv));
     for (int i = 0; i < lq; ++i)
         for (int j = 0; j < lkv; ++j) keep[i][j] = j <= lkv - lq + i;
@@ -589,7 +608,7 @@ Q 为 `[B,Hq,Lq,d]`，K/V 为 `[B,Hkv,Lkv,d/dv]`：
 ```python
 def gqa_torch(q, k, v, keep=None):
     group = q.shape[1] // k.shape[1]
-    kr = k.repeat_interleave(group, dim=1)
+    kr = k.repeat_interleave(group, dim=1) # 连续 group 个 Query heads 共用一个 KV head
     vr = v.repeat_interleave(group, dim=1)
     return attention_torch(q, kr, vr, keep)
 ```
@@ -600,6 +619,7 @@ def gqa_torch(q, k, v, keep=None):
 
 ```python
 def gqa_py(q, k, v, keep=None):
+    # h//group 表示连续分组，不能改成 h%Hkv。
     group = len(q) // len(k)
     return [attention_py(query, k[h // group], v[h // group], keep)
             for h, query in enumerate(q)]
@@ -610,6 +630,7 @@ def gqa_py(q, k, v, keep=None):
 ```cpp
 Heads gqa_cpp(const Heads& q, const Heads& k, const Heads& v,
               const vector<vector<bool>>& keep = {}) {
+    // 每个请求内按 Query head 遍历，K/V head 数可以更少。
     int group = int(q.size() / k.size());
     Heads output;
     for (int h = 0; h < int(q.size()); ++h)
@@ -631,9 +652,10 @@ def mha_torch(x, wq, wk, wv, wo, heads, keep=None):
     b, length, hidden = x.shape
     d = hidden // heads
     def split(weight):
+        # 先拆为 [B,L,H,d]，再交换到 [B,H,L,d]。
         return linear_torch(x, weight).reshape(b, length, heads, d).transpose(1, 2)
     output = attention_torch(split(wq), split(wk), split(wv), keep)
-    merged = output.transpose(1, 2).contiguous().reshape(b, length, hidden)
+    merged = output.transpose(1, 2).contiguous().reshape(b, length, hidden) # 合头前恢复 L/H 顺序
     return linear_torch(merged, wo)
 ```
 
@@ -648,7 +670,7 @@ def mha_py(x, wq, wk, wv, wo, heads, keep=None):
         projected = linear_py(x, weight)
         return [[row[h * d:(h + 1) * d] for row in projected] for h in range(heads)]
     output = gqa_py(split(wq), split(wk), split(wv), keep)
-    merged = [[value for head in output for value in head[i]] for i in range(len(x))]
+    merged = [[value for head in output for value in head[i]] for i in range(len(x))] # 同一位置拼接所有 heads
     return linear_py(merged, wo)
 ```
 
@@ -659,6 +681,7 @@ Mat mha_cpp(const Mat& x, const Mat& wq, const Mat& wk, const Mat& wv,
             const Mat& wo, int heads, const vector<vector<bool>>& keep = {}) {
     int length = int(x.size()), hidden = int(x[0].size()), d = hidden / heads;
     auto split = [&](const Mat& weight) {
+        // projected 的最后一维按连续 d 个元素拆成一个 head。
         Mat projected = linear_cpp(x, weight);
         Heads result(heads, Mat(length, Vec(d)));
         for (int h = 0; h < heads; ++h)
@@ -687,6 +710,7 @@ cache 和 new 为 `[B,Hkv,L,d]`，这里 K/V 的最后一维均设为 d：
 
 ```python
 def append_kv_torch(cache_k, cache_v, new_k, new_v):
+    # 沿倒数第二维（序列）追加，保留 batch/head/通道维。
     return torch.cat((cache_k, new_k), dim=-2), torch.cat((cache_v, new_v), dim=-2)
 ```
 
@@ -696,6 +720,7 @@ def append_kv_torch(cache_k, cache_v, new_k, new_v):
 
 ```python
 def append_kv_py(cache_k, cache_v, new_k, new_v):
+    # 复制外层列表；已有行对象仍共享引用。
     return cache_k + new_k, cache_v + new_v
 ```
 
@@ -706,6 +731,7 @@ def append_kv_py(cache_k, cache_v, new_k, new_v):
 ```cpp
 pair<Mat, Mat> append_kv_cpp(const Mat& cache_k, const Mat& cache_v,
                            const Mat& new_k, const Mat& new_v) {
+    // 参考写法复制旧缓存，真实推理可改为预分配或分页管理。
     Mat k = cache_k, v = cache_v;
     k.insert(k.end(), new_k.begin(), new_k.end());
     v.insert(v.end(), new_v.begin(), new_v.end());
@@ -737,7 +763,7 @@ def cross_entropy_torch(logits, targets):
     work = acc_torch(logits)
     shifted = work - work.amax(dim=-1, keepdim=True)
     log_denom = shifted.exp().sum(dim=-1).log()
-    selected = shifted.gather(1, targets[:, None]).squeeze(1)
+    selected = shifted.gather(1, targets[:, None]).squeeze(1) # 每行取目标类别的平移后 logit
     return (log_denom - selected).mean()
 ```
 
@@ -748,7 +774,7 @@ def cross_entropy_py(logits, targets):
     losses = []
     for row, target in zip(logits, targets):
         maximum = max(row)
-        log_denom = math.log(sum(math.exp(x - maximum) for x in row))
+        log_denom = math.log(sum(math.exp(x - maximum) for x in row)) # 稳定 log-sum-exp
         losses.append(log_denom - (row[target] - maximum))
     return sum(losses) / len(losses)
 ```
@@ -762,7 +788,7 @@ double cross_entropy_cpp(const Mat& logits, const vector<int>& targets) {
         const Vec& row = logits[i];
         double maximum = *max_element(row.begin(), row.end()), total = 0.0;
         for (double x : row) total += exp(x - maximum);
-        loss += log(total) - (row[targets[i]] - maximum);
+        loss += log(total) - (row[targets[i]] - maximum); // 直接用 logits，避免先算极小概率再取 log
     }
     return loss / logits.size();
 }

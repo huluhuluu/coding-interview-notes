@@ -1,7 +1,7 @@
 ---
 title: "ACM 输入处理：C++ / Python"
 date: 2026-10-20T12:00:00+08:00
-lastmod: 2026-10-20T16:00:00+08:00
+lastmod: 2026-10-20T16:40:00+08:00
 draft: false
 description: "按输入格式整理 C++ 和 Python 的 ACM 模板，区分 token、整行、多组数据和 EOF"
 slug: "acm-input-cpp-python"
@@ -71,7 +71,7 @@ int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
     int n;
-    if (!(cin >> n)) return 0;
+    if (!(cin >> n)) return 0; // 先确认读取成功，再按 n 创建数组
     vector<long long> a(n);
     long long total = 0;
     for (auto& x : a) {
@@ -87,7 +87,7 @@ int main() {
 ```python
 import sys
 
-tokens = iter(sys.stdin.buffer.read().split())
+tokens = iter(sys.stdin.buffer.read().split()) # 按空白取 token，数组换行不影响读取
 n = int(next(tokens))
 a = [int(next(tokens)) for _ in range(n)]
 print(sum(a))
@@ -113,7 +113,7 @@ int main() {
     while (t--) {
         int n;
         cin >> n;
-        long long total = 0, x;
+        long long total = 0, x; // 每组重新初始化，避免累加上一组的结果
         for (int i = 0; i < n; ++i) {
             cin >> x;
             total += x;
@@ -150,7 +150,7 @@ using namespace std;
 
 int main() {
     long long a, b;
-    while (cin >> a >> b) cout << a + b << '\n';
+    while (cin >> a >> b) cout << a + b << '\n'; // 读取失败时退出，不预判 eof 标志
 }
 ```
 
@@ -168,7 +168,7 @@ def integers():
 
 it = iter(integers())
 for a in it:
-    b = next(it)  # 题目保证每组两个数
+    b = next(it)  # 题目保证每组两个数；两数可以分布在不同的行
     print(a + b)
 ```
 
@@ -187,7 +187,7 @@ using namespace std;
 int main() {
     long long a, b;
     while (cin >> a >> b) {
-        if (a == 0 && b == 0) break;
+        if (a == 0 && b == 0) break; // 哨兵不参与本组计算
         cout << a + b << '\n';
     }
 }
@@ -254,7 +254,7 @@ using namespace std;
 int main() {
     int n;
     cin >> n;
-    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    cin.ignore(numeric_limits<streamsize>::max(), '\n'); // 丢弃 n 所在行的剩余内容
     string line;
     for (int i = 0; i < n; ++i) {
         getline(cin, line);
@@ -272,7 +272,7 @@ import sys
 
 n = int(sys.stdin.readline())
 for _ in range(n):
-    line = sys.stdin.readline().removesuffix("\n").removesuffix("\r")
+    line = sys.stdin.readline().removesuffix("\n").removesuffix("\r") # Python 3.9+，只去换行
     print(line)
 ```
 

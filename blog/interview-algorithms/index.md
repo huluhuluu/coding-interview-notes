@@ -1,7 +1,7 @@
 ---
 title: "笔试常见算法"
 date: 2026-10-20T12:20:00+08:00
-lastmod: 2026-10-20T16:00:00+08:00
+lastmod: 2026-10-20T16:40:00+08:00
 draft: false
 description: "从数据范围与性质选择算法，整理前缀和、双指针、二分、搜索、图论和动态规划模板"
 slug: "interview-algorithms"
@@ -49,7 +49,7 @@ math: true
 
 ```python
 def prefix_sums(a):
-    prefix = [0]
+    prefix = [0]  # prefix[i] 保存前 i 个元素之和，空前缀为 0
     for x in a:
         prefix.append(prefix[-1] + x)
     return prefix
@@ -61,11 +61,11 @@ def prefix_sums(a):
 
 ```python
 def count_subarrays(a, k):
-    freq = {0: 1}
+    freq = {0: 1}  # 空前缀出现一次，用于统计从下标 0 开始的区间
     s = answer = 0
     for x in a:
         s += x
-        answer += freq.get(s - k, 0)
+        answer += freq.get(s - k, 0) # 先查询旧前缀，避免统计空区间
         freq[s] = freq.get(s, 0) + 1
     return answer
 ```
@@ -82,7 +82,7 @@ int longest_window(const vector<int>& a, long long limit) {
     long long sum = 0;
     for (int right = 0; right < int(a.size()); ++right) {
         sum += a[right];
-        while (sum > limit) sum -= a[left++];
+        while (sum > limit) sum -= a[left++]; // 非负数组上，右移左端点使区间和不增
         answer = max(answer, right - left + 1);
     }
     return answer;
@@ -102,9 +102,9 @@ def first_true(lo, hi, feasible):
     while lo < hi:
         mid = (lo + hi) // 2
         if feasible(mid):
-            hi = mid
+            hi = mid      # mid 可行，保留它并向左找首个可行值
         else:
-            lo = mid + 1
+            lo = mid + 1  # mid 不可行，排除它及左侧范围
     return lo
 ```
 
@@ -137,7 +137,7 @@ def bfs(graph, start):
         u = q.popleft()
         for v in graph[u]:
             if dist[v] == -1:
-                dist[v] = dist[u] + 1
+                dist[v] = dist[u] + 1 # 入队时标记，避免同一顶点重复入队
                 q.append(v)
     return dist
 ```
@@ -162,10 +162,10 @@ vector<long long> dijkstra(
     while (!heap.empty()) {
         auto [d, u] = heap.top();
         heap.pop();
-        if (d != dist[u]) continue;
+        if (d != dist[u]) continue; // 跳过堆中已被更短距离替代的旧记录
         for (auto [v, w] : graph[u]) {
             if (d + w < dist[v]) {
-                dist[v] = d + w;
+                dist[v] = d + w; // 用经过 u 的路径松弛 v
                 heap.push({dist[v], v});
             }
         }
@@ -188,7 +188,7 @@ class DSU:
 
     def find(self, x):
         while self.parent[x] != x:
-            self.parent[x] = self.parent[self.parent[x]]
+            self.parent[x] = self.parent[self.parent[x]] # 路径折半，缩短后续查找路径
             x = self.parent[x]
         return x
 
@@ -196,7 +196,7 @@ class DSU:
         a, b = self.find(a), self.find(b)
         if a == b:
             return False
-        if self.size[a] < self.size[b]:
+        if self.size[a] < self.size[b]: # 小树接到大树，控制树高
             a, b = b, a
         self.parent[b] = a
         self.size[a] += self.size[b]
@@ -218,7 +218,7 @@ def knapsack_01(weights, values, capacity):
     # dp[c]：容量不超过 c 时的最大价值，允许不选物品
     dp = [0] * (capacity + 1)
     for w, value in zip(weights, values):
-        for c in range(capacity, w - 1, -1):
+        for c in range(capacity, w - 1, -1): # 倒序，保证当前物品只使用一次
             dp[c] = max(dp[c], dp[c - w] + value)
     return dp[capacity]
 ```
@@ -233,11 +233,11 @@ from bisect import bisect_left
 def lis_length(a):
     tails = []
     for x in a:
-        i = bisect_left(tails, x)
+        i = bisect_left(tails, x) # 找第一个 >=x 的末尾值，对应严格递增
         if i == len(tails):
             tails.append(x)
         else:
-            tails[i] = x
+            tails[i] = x         # 降低同长度子序列的末尾，为后续元素留空间
     return len(tails)
 ```
 
@@ -253,7 +253,7 @@ def next_greater(a):
     stack = []
     for i, x in enumerate(a):
         while stack and a[stack[-1]] < x:
-            answer[stack.pop()] = i
+            answer[stack.pop()] = i # 当前 i 是这些下标右侧首个更大位置
         stack.append(i)
     return answer
 ```
