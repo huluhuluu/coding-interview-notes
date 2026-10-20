@@ -1,9 +1,9 @@
 ---
 title: "Python 常用接口"
 date: 2026-10-20T16:40:00+08:00
-lastmod: 2026-10-20T16:40:00+08:00
+lastmod: 2026-10-20T17:15:00+08:00
 draft: false
-description: "Python 列表、切片、字符串、字典、堆与遍历接口的语义和边界"
+description: "Python 列表、切片、字符串、字典、堆、数值边界与遍历接口"
 slug: "python-apis"
 tags: ["python", "标准库"]
 categories: ["笔试重点"]
@@ -22,6 +22,9 @@ math: true
   - [6. heapq 与 deque](#6-heapq-与-deque)
   - [7. 字符串](#7-字符串)
   - [8. 数值与转换](#8-数值与转换)
+    - [8.1 整数边界](#81-整数边界)
+    - [8.2 浮点边界](#82-浮点边界)
+    - [8.3 最值与距离初始化](#83-最值与距离初始化)
   - [9. 遍历与归约](#9-遍历与归约)
   - [参考资料](#参考资料)
 
@@ -213,6 +216,79 @@ Python 字符串不可原地修改，`replace/strip` 等方法返回新字符串
 
 `//` 向下取整，`-3//2==-2`；`int(-1.5)==-1` 是向零截断。`int.bit_count()` 需要 Python 3.10+。模逆元与组合数见 [笔试常见技巧](../interview-tricks/index.md)。
 
+### 8.1 整数边界
+
+Python `int` 是任意精度整数，受可用内存等资源限制，没有固定的 `INT_MAX/INT_MIN`。`sys.maxsize` 是平台 `Py_ssize_t` 类型的最大值，用于容器长度等接口，不是 Python 整数上限。
+
+```python
+import sys
+
+index_max = sys.maxsize      # 常见 64 位平台为 2**63 - 1
+index_min = -sys.maxsize - 1 # 对应有符号尺寸类型的下界，不是合法列表下标范围
+larger = sys.maxsize + 1     # 仍是合法 int，不会溢出
+huge = 10**100               # 远大于 64 位整数上限
+
+# 题目要求判断能否放入有符号 32 位整数时，手动定义该范围。
+int32_min, int32_max = -(1 << 31), (1 << 31) - 1
+fits_int32 = int32_min <= huge <= int32_max # False
+```
+
+`sys.maxsize`、`10**18` 都不能作为任意整数输入的通用上界。与 C++ 不同，Python 的大整数加减乘不会因超过 64 位而回绕。
+
+### 8.2 浮点边界
+
+Python `float` 通常采用 C double 对应的 IEEE 754 binary64 格式。通过 `sys.float_info` 查询有限值范围，通过 `math.inf` 或 `float("inf")` 表示无穷。
+
+| 含义 | 接口 | 常见 binary64 值 |
+|------|------|------|
+| 最大有限值 | `sys.float_info.max` | 约 `1.797693e308` |
+| 最负有限值 | `-sys.float_info.max` | 约 `-1.797693e308` |
+| 最小正正规数 | `sys.float_info.min` | 约 `2.225074e-308` |
+| 最小正非正规数 | `math.ulp(0.0)`，Python 3.9+ | 约 `4.94e-324` |
+| 1 与下一个可表示数的间距 | `sys.float_info.epsilon` | 约 `2.220446e-16` |
+| 正无穷 / 负无穷 | `math.inf` / `-math.inf` | `inf` / `-inf` |
+
+**`sys.float_info.min` 是正数，不是最负浮点数。** Python 没有内置的 `float_max/float_min` 常量，可按含义自行命名。
+
+```python
+import math
+import sys
+
+float_max = sys.float_info.max
+float_min = sys.float_info.min  # 最小正正规数
+float_lowest = -sys.float_info.max
+tiny = math.ulp(0.0)            # Python 3.9+，比 float_min 更接近 0
+eps = sys.float_info.epsilon    # 1.0 附近的间距，不是通用误差阈值
+inf = float("inf")             # 等于 math.inf；负无穷可写 float("-inf")
+finite = math.isfinite(float_max) # True
+infinite = math.isinf(-inf)       # True
+```
+
+极大整数转换为 float 可能丢失精度或抛出 `OverflowError`；整数计算无需先转换成浮点数。浮点比较容差应结合数据范围，不能把 epsilon 直接用于所有数量级。
+
+### 8.3 最值与距离初始化
+
+```python
+import math
+
+values = [-8, -3, -5]  # 已知非空，也可直接用 min(values)、max(values)
+minimum, maximum = math.inf, -math.inf
+for x in values:
+    minimum = min(minimum, x) # -8；选中的值仍为 int
+    maximum = max(maximum, x) # -3；初始化为 0 会错
+
+# 最短路距离：不可达用 inf；已到达的距离继续保持整数运算。
+dist = [math.inf] * 3
+dist[0] = 0
+u, v, weight = 0, 1, 7
+if dist[u] != math.inf:
+    dist[v] = min(dist[v], dist[u] + weight) # 7，类型为 int
+```
+
+正负无穷可与任意大小的 int 比较，但不要把 inf 转换为 int。空输入时上述最值循环会保留无穷，需根据题意处理空结果。
+
+如果要求状态始终为整数，可从题目范围推导 INF。例如非负边权不超过 W、n 个点的最短路，有限最短路可取至多 n-1 条边，因而可用 `INF=(n-1)*W+1`，并在加法前跳过不可达状态。
+
 ## 9. 遍历与归约
 
 ```python
@@ -235,3 +311,6 @@ total = sum(x * x for x in a)       # 23，生成器逐项产生平方
 - [collections](https://docs.python.org/3/library/collections.html)
 - [heapq](https://docs.python.org/3/library/heapq.html)
 - [bisect](https://docs.python.org/3/library/bisect.html)
+- [sys.float_info](https://docs.python.org/3/library/sys.html#sys.float_info)
+- [sys.maxsize](https://docs.python.org/3/library/sys.html#sys.maxsize)
+- [math：无穷、数值判断与 ulp](https://docs.python.org/3/library/math.html)

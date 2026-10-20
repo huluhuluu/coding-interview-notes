@@ -1,9 +1,9 @@
 ---
 title: "C++ 常用接口"
 date: 2026-10-20T16:40:00+08:00
-lastmod: 2026-10-20T16:40:00+08:00
+lastmod: 2026-10-20T17:15:00+08:00
 draft: false
-description: "C++17 容器、排序、二分、string.substr、字符串修改与标准算法"
+description: "C++17 容器、排序、二分、string.substr、数值边界与标准算法"
 slug: "cpp-apis"
 tags: ["cpp", "标准库"]
 categories: ["笔试重点"]
@@ -23,6 +23,9 @@ math: true
     - [6.1 substr 与区间](#61-substr-与区间)
     - [6.2 查找、修改与转换](#62-查找修改与转换)
   - [7. 数值与初始化](#7-数值与初始化)
+    - [7.1 整数边界](#71-整数边界)
+    - [7.2 浮点边界](#72-浮点边界)
+    - [7.3 最值与距离初始化](#73-最值与距离初始化)
   - [8. 常用标准算法](#8-常用标准算法)
   - [参考资料](#参考资料)
 
@@ -215,7 +218,95 @@ C++17 可用 `compare` 检查前后缀；`starts_with/ends_with` 是 C++20 接�
 
 整数除法向零截断，例如 `-3/2==-1`；需要向下取整时不能直接照搬 Python 的 `//`。乘法前用 `1LL*a*b` 提升类型，仍需保证最终结果不溢出。
 
-距离上界应大于所有合法答案，不可达状态不直接参与加法。`memset` 按字节写入，不能通用地把整数数组填成任意整数。模幂与逆元见 [笔试常见技巧](../interview-tricks/index.md)。
+### 7.1 整数边界
+
+C++ 宏名区分大小写，写 `INT_MAX/INT_MIN`。`<climits>` 提供整数边界；`<limits>` 的 `numeric_limits<T>` 可以按类型统一查询。
+
+| 类型 | 最小值 | 最大值 |
+|------|------|------|
+| `int` | `INT_MIN` | `INT_MAX` |
+| `long long` | `LLONG_MIN` | `LLONG_MAX` |
+| `unsigned int` | `0` | `UINT_MAX` |
+| `unsigned long long` | `0` | `ULLONG_MAX` |
+| 整数类型 `T` | `numeric_limits<T>::min()` 或 `lowest()` | `numeric_limits<T>::max()` |
+
+常见 32 位 int 的范围为 `[-2147483648,2147483647]`，64 位 long long 为 `[-2^63,2^63-1]`；代码应使用接口读取边界，避免依赖手写常量。
+
+```cpp
+#include <climits>
+#include <limits>
+using namespace std;
+
+int int_max = INT_MAX;
+int int_min = INT_MIN;
+long long ll_max = LLONG_MAX;
+long long ll_min = numeric_limits<long long>::lowest(); // 等于 LLONG_MIN
+unsigned int uint_max = UINT_MAX; // 无符号整数的下界为 0
+```
+
+边界值不能当成可继续任意运算的普通值。`INT_MAX+1`、`-INT_MIN`、`-LLONG_MIN` 都会发生有符号整数溢出，行为未定义；无符号整数运算则按其位宽取模。
+
+### 7.2 浮点边界
+
+`<cfloat>` 提供 `FLT_*`、`DBL_*`、`LDBL_*`，分别对应 float、double、long double。**浮点数的 `min()` / `FLT_MIN` 表示最小正正规数，不是最负值。**
+
+| 含义 | float | double |
+|------|------|------|
+| 最大有限值 | `FLT_MAX` | `DBL_MAX` |
+| 最小正正规数 | `FLT_MIN` | `DBL_MIN` |
+| 最负有限值 | `numeric_limits<float>::lowest()` | `numeric_limits<double>::lowest()` |
+| 最小正非正规数，支持时 | `numeric_limits<float>::denorm_min()` | `numeric_limits<double>::denorm_min()` |
+| 1 与下一个可表示数的间距 | `FLT_EPSILON` | `DBL_EPSILON` |
+| 正无穷，支持时 | `numeric_limits<float>::infinity()` | `numeric_limits<double>::infinity()` |
+
+常见 IEEE 754 格式下，float 的最大有限值约 `3.402823e38`，最小正正规数约 `1.175494e-38`；double 分别约 `1.797693e308`、`2.225074e-308`。最负有限值分别为对应最大有限值的相反数。
+
+```cpp
+#include <cfloat>
+#include <cmath>
+#include <limits>
+using namespace std;
+
+float float_max = FLT_MAX;
+float float_min = FLT_MIN; // 正数；不要用来初始化“寻找最大值”
+double lowest = numeric_limits<double>::lowest();
+double tiny = numeric_limits<double>::denorm_min(); // IEEE 754 binary64 下约 4.94e-324
+double eps = numeric_limits<double>::epsilon();    // 等于 DBL_EPSILON
+static_assert(numeric_limits<double>::has_infinity, "requires infinity");
+double inf = numeric_limits<double>::infinity();
+bool infinite = isinf(inf);        // true；负无穷为 -inf
+bool finite = isfinite(DBL_MAX);   // true；最大有限值与无穷不同
+```
+
+`epsilon()` 是 1 附近的间距，不是所有数量级通用的误差阈值；比较容差应结合题目要求和数据范围。
+
+### 7.3 最值与距离初始化
+
+```cpp
+#include <algorithm>
+#include <limits>
+#include <vector>
+using namespace std;
+
+vector<int> a{-8, -3, -5}; // 已知非空
+int minimum = numeric_limits<int>::max();
+int maximum = numeric_limits<int>::lowest();
+for (int x : a) {
+    minimum = min(minimum, x); // -8
+    maximum = max(maximum, x); // -3；初始化为 0 会错
+}
+
+// 假设合法路径长度不超过 10^15，边权非负且不超过 10^9。
+const long long INF = numeric_limits<long long>::max() / 4;
+long long dist_u = INF, dist_v = INF, weight = 7;
+if (dist_u != INF) { // 不可达状态不参与加法
+    dist_v = min(dist_v, dist_u + weight);
+}
+```
+
+`max()/4` 只是留出加法余量，不保证任意输入都安全：INF 必须严格大于所有合法答案，参与运算的中间结果也须在类型范围内。浮点最值可用正负无穷初始化；整数没有无穷值。
+
+`memset` 按字节写入，不能通用地把整数数组填成任意整数。模幂与逆元见 [笔试常见技巧](../interview-tricks/index.md)。
 
 ## 8. 常用标准算法
 
@@ -244,3 +335,6 @@ fill(order.begin(), order.end(), -1);                // {-1,-1,-1,-1}，按元�
 - [C++ 标准草案：容器](https://eel.is/c++draft/containers)
 - [C++ 标准草案：string.substr](https://eel.is/c++draft/string.substr)
 - [C++ 标准草案：算法库](https://eel.is/c++draft/algorithms)
+- [C++ 标准草案：整数边界宏](https://eel.is/c++draft/climits.syn)
+- [C++ 标准草案：浮点边界宏](https://eel.is/c++draft/cfloat.syn)
+- [C++ 标准草案：numeric_limits](https://eel.is/c++draft/numeric.limits.members)
