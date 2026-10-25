@@ -1,7 +1,7 @@
 ---
 title: "DeepSeek V4 Flash 模型结构与维度"
 date: 2026-10-20T16:15:00+08:00
-lastmod: 2026-10-20T16:15:00+08:00
+lastmod: 2026-10-25T12:20:00+08:00
 draft: false
 description: "对照 DeepSeek V4 Flash 官方配置与参考实现，梳理 mHC、压缩 Attention、MoE、MTP 的输入输出维度和计算路径"
 slug: "deepseek-v4-flash-architecture"
@@ -43,6 +43,8 @@ math: true
   - [参考资料](#参考资料)
 
 对照官方配置与推理代码，沿一次前向计算梳理张量形状。基础算子实现见 [LLM 核心算子手撕](../llm-operator-implementations/index.md)。
+
+图文详解与技术报告对照见 [DeepSeek V4 模型结构](https://github.com/huluhuluu/transformers-code-view/blob/main/blog/deepseek-v4-architecture/index.md)，后续变化见 [DeepSeek V4.1 Flash 模型结构](https://github.com/huluhuluu/transformers-code-view/blob/main/blog/deepseek-v41-architecture/index.md)。
 
 ## 1. 配置与维度约定
 
